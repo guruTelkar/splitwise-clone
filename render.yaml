@@ -1,0 +1,22 @@
+# Render Blueprint — deploy the backend on Render's free tier.
+# In Render dashboard: New -> Blueprint -> select this repo (or upload render.yaml).
+# Secrets referenced below must be added as env vars (DATABASE_URL, JWT_SECRET).
+
+services:
+  - type: web
+    name: splitwise-clone-api
+    runtime: docker
+    repo: https://github.com/YOUR_USERNAME/splitwise-clone.git
+    plan: free
+    region: oregon
+    dockerfilePath: ./server/Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: APP_NAME
+        value: Splitwise Clone
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        value: '*'

@@ -75,6 +75,16 @@ class GroupMember(Base):
     group: Mapped["Group"] = relationship(back_populates="members")
 
 
+class GroupInvite(Base):
+    __tablename__ = "group_invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 

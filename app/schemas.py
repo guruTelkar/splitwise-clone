@@ -59,6 +59,10 @@ class AddMemberRequest(BaseModel):
     user_id: int
 
 
+class JoinGroupRequest(BaseModel):
+    code: str = Field(min_length=3, max_length=40)
+
+
 class PayerIn(BaseModel):
     user_id: int
     amount: float = Field(gt=0)

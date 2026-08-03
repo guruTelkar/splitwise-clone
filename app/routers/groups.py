@@ -1,11 +1,13 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..balance import balance_for_expenses, simplify_debts
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Expense, Group, GroupMember, Payment, User
-from ..schemas import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
+from ..models import Expense, Group, GroupInvite, GroupMember, Payment, User
+from ..schemas import AddMemberRequest, CreateGroupRequest, JoinGroupRequest, UpdateGroupRequest
 from ..service import (
     create_activity,
     get_group_or_404,
@@ -91,6 +93,71 @@ def list_groups(
         db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.updated_at.desc()).all()
     )
     return [_serialize_group(db, g, user) for g in groups]
+
+
+@router.get("/invites/{code}")
+def invite_info(code: str, db: Session = Depends(get_db)):
+    """Public preview used before joining a group via an invite link."""
+    invite = db.query(GroupInvite).filter(GroupInvite.code == code.strip()).first()
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    group = db.get(Group, invite.group_id)
+    if group is None or group.is_archived:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member_count = (
+        db.query(GroupMember).filter(GroupMember.group_id == group.id).count()
+    )
+    return {
+        "code": code.strip(),
+        "group": {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "member_count": member_count,
+        },
+    }
+
+
+@router.post("/{group_id}/invite")
+def create_invite(
+    group_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    if not is_group_member(db, group_id, user.id):
+        raise HTTPException(status_code=403, detail="Not a member of this group")
+    existing = (
+        db.query(GroupInvite).filter(GroupInvite.group_id == group_id).first()
+    )
+    if existing:
+        return {"code": existing.code}
+    code = secrets.token_urlsafe(6)
+    db.add(GroupInvite(group_id=group_id, code=code, created_by=user.id))
+    db.commit()
+    return {"code": code}
+
+
+@router.post("/join")
+def join_group(
+    payload: JoinGroupRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    invite = (
+        db.query(GroupInvite).filter(GroupInvite.code == payload.code.strip()).first()
+    )
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    group = db.get(Group, invite.group_id)
+    if group is None or group.is_archived:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if not is_group_member(db, group.id, user.id):
+        db.add(GroupMember(group_id=group.id, user_id=user.id))
+        db.commit()
+        create_activity(db, group.id, user.id, "member_joined", {"name": user.name})
+        db.commit()
+    return _serialize_group(db, group, user)
 
 
 @router.get("/{group_id}")

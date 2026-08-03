@@ -203,6 +203,23 @@ def main():
     s, gd = get(f"/groups/{gid}", alice)
     check("group detail has expenses", s == 200 and len(gd["expenses"]) == 3)
 
+    print("== Group invite ==")
+    s, inv = post(f"/groups/{gid}/invite", {}, alice)
+    check("create invite", s == 200 and len(inv.get("code", "")) >= 6, inv)
+    code = inv["code"]
+    s, pub = get(f"/groups/invites/{code}")
+    check("invite preview public", s == 200 and pub["group"]["name"] == "Roommates", pub)
+    eve_email = f"eve{int(time.time())}@test.com"
+    s, reg = post("/auth/register", {"email": eve_email, "name": "Eve", "password": "secret1"})
+    check("register eve", s == 200, reg)
+    eve_id = reg["user"]["id"]
+    s, join = post("/groups/join", {"code": code}, reg["token"])
+    check("eve joins via invite", s == 200 and any(m["id"] == eve_id for m in join["members"]), join)
+    s, dup = post("/groups/join", {"code": code}, reg["token"])
+    check("join idempotent", s == 200)
+    s, bad = post("/groups/join", {"code": "badcode1"}, reg["token"])
+    check("invalid invite 404", s == 404, bad)
+
     print("== Simplify debts ==")
     s, bal = get(f"/groups/{gid}/balances", alice)
     simplified = bal["simplified_debts"]

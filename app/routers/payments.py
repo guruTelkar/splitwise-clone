@@ -64,6 +64,7 @@ def _create_payment(
             "from_user_id": payload.from_user_id,
             "to_user_id": payload.to_user_id,
             "amount_cents": payment.amount_cents,
+            "currency": payment.currency,
         },
     )
     if payee and payee.id != user.id:

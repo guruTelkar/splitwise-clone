@@ -158,6 +158,7 @@ def create_expense(
             "expense_id": expense.id,
             "description": expense.description,
             "amount_cents": expense.amount_cents,
+            "currency": expense.currency,
         },
     )
     for participant in participants:
@@ -278,7 +279,7 @@ def delete_expense(
         expense.group_id,
         user.id,
         "expense_deleted",
-        {"description": expense.description, "amount_cents": expense.amount_cents},
+        {"description": expense.description, "amount_cents": expense.amount_cents, "currency": expense.currency},
     )
     db.delete(expense)
     db.commit()

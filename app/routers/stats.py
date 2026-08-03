@@ -82,7 +82,7 @@ def group_stats(
             delta = convert_cents(p.share_cents, e.currency, base)
             bucket[p.user_id] = bucket.get(p.user_id, 0) - delta
     for p in payments:
-        month = p.created_at[:7]
+        month = p.created_at.strftime("%Y-%m")
         bucket = months.setdefault(month, {})
         delta = convert_cents(p.amount_cents, p.currency, base)
         bucket[p.from_user_id] = bucket.get(p.from_user_id, 0) + delta

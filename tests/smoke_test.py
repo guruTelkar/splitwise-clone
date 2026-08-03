@@ -5,6 +5,7 @@ Run against a live server:  python tests/smoke_test.py
 
 import json
 import sys
+import time
 
 import httpx
 
@@ -84,6 +85,26 @@ def main():
     check("alice adds carol", s == 200)
     s, fl = get("/friends", alice)
     check("friends list has 2", s == 200 and len(fl) == 2, fl)
+
+    print("== Add friend by email (lightweight) ==")
+    dave_email = f"dave{int(time.time())}@test.com"
+    s, fb = post("/friends", {"email": dave_email, "name": "Dave"}, alice)
+    check("add by email creates user", s == 200 and fb["friend"]["email"] == dave_email, fb)
+    dave_id = fb["friend"]["id"]
+    s, fl = get("/friends", alice)
+    check("dave in friends list", s == 200 and any(f["friend"]["id"] == dave_id for f in fl))
+    s, bad = post("/auth/login", {"email": dave_email, "password": "guess1"})
+    check("placeholder cannot login", s == 401)
+    s, reg = post("/auth/register", {"email": dave_email, "name": "Davey", "password": "secret1"})
+    check("claim placeholder via register", s == 200 and reg["user"]["id"] == dave_id and reg["user"]["name"] == "Davey", reg)
+    s, login = post("/auth/login", {"email": dave_email, "password": "secret1"})
+    check("dave can login after claim", s == 200)
+    s, dup = post("/auth/register", {"email": dave_email, "name": "Dave2", "password": "secret2"})
+    check("claim only once", s == 400, dup)
+    s, fb2 = post("/friends", {"email": dave_email}, alice)
+    check("re-add existing email idempotent", s == 200 and fb2["friend"]["id"] == dave_id, fb2)
+    s, bad = post("/friends", {}, alice)
+    check("friends requires id or email", s == 422, bad)
 
     print("== IOU expense (friend) ==")
     s, e = post(

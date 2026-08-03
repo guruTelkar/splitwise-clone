@@ -5,6 +5,15 @@ import jwt
 
 from .config import settings
 
+# Sentinel hash for lightweight accounts created by adding a friend by email.
+# Never a valid bcrypt hash, so these accounts cannot be logged into until
+# they register and "claim" the email address.
+PLACEHOLDER_PASSWORD = "!splitwise-placeholder"
+
+
+def is_placeholder(user_hash: str) -> bool:
+    return user_hash == PLACEHOLDER_PASSWORD
+
 
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()

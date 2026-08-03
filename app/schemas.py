@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -26,7 +26,15 @@ class UserUpdate(BaseModel):
 
 
 class AddFriendRequest(BaseModel):
-    friend_id: int
+    friend_id: int | None = None
+    email: EmailStr | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def check_source(self):
+        if self.friend_id is None and self.email is None:
+            raise ValueError("Provide either friend_id or email")
+        return self
 
 
 class CreateGroupRequest(BaseModel):

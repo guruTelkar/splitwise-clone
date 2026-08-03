@@ -6,9 +6,33 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Expense, FriendLink, Payment, User
 from ..schemas import AddFriendRequest
+from ..security import PLACEHOLDER_PASSWORD
 from ..service import serialize_expense, serialize_user
 
 router = APIRouter(prefix="/friends", tags=["friends"])
+
+
+def _resolve_friend(
+    db: Session, me: User, friend_id: int | None, email: str | None, name: str | None
+) -> User:
+    if friend_id is not None:
+        friend = db.get(User, friend_id)
+        if friend is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return friend
+    email = email.lower().strip()
+    friend = db.query(User).filter(User.email == email).first()
+    if friend is None:
+        display = (name or email.split("@")[0]).strip() or email.split("@")[0]
+        friend = User(
+            email=email,
+            name=display,
+            password_hash=PLACEHOLDER_PASSWORD,
+            base_currency=me.base_currency,
+        )
+        db.add(friend)
+        db.flush()
+    return friend
 
 
 def _friend_balance(db: Session, me_id: int, friend_id: int) -> dict[int, int]:
@@ -72,27 +96,27 @@ def add_friend(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if payload.friend_id == user.id:
+    friend = _resolve_friend(db, user, payload.friend_id, payload.email, payload.name)
+    if friend.id == user.id:
         raise HTTPException(status_code=400, detail="You cannot add yourself as a friend")
-    friend = db.get(User, payload.friend_id)
-    if friend is None:
-        raise HTTPException(status_code=404, detail="User not found")
     existing = (
         db.query(FriendLink)
         .filter(
             (
-                (FriendLink.user_id == user.id) & (FriendLink.friend_id == payload.friend_id)
+                (FriendLink.user_id == user.id) & (FriendLink.friend_id == friend.id)
             )
             | (
-                (FriendLink.user_id == payload.friend_id) & (FriendLink.friend_id == user.id)
+                (FriendLink.user_id == friend.id) & (FriendLink.friend_id == user.id)
             )
         )
         .first()
     )
     if existing:
+        db.commit()
         return {"friend": serialize_user(friend), "balance_cents": 0}
-    db.add(FriendLink(user_id=user.id, friend_id=payload.friend_id))
+    db.add(FriendLink(user_id=user.id, friend_id=friend.id))
     db.commit()
+    db.refresh(friend)
     return {"friend": serialize_user(friend), "balance_cents": 0}
 
 

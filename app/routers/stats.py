@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from ..balance import balance_for_expenses, simplify_debts
 from ..database import get_db
 from ..deps import get_current_user, require_pro
-from ..models import Expense, GroupMember, Payment, User
-from ..service import convert_cents, is_group_member
+from ..models import Expense, Group, GroupMember, Payment, User
+from ..service import convert_cents, get_group_or_404, is_group_member
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -27,26 +27,33 @@ def group_stats(
     if not is_group_member(db, group_id, user.id):
         raise HTTPException(status_code=403, detail="Not a member of this group")
 
+    group = get_group_or_404(db, group_id)
+    base = group.currency
+
     expenses = db.query(Expense).filter(Expense.group_id == group_id).all()
     payments = db.query(Payment).filter(Payment.group_id == group_id).all()
 
-    base = user.base_currency
     total_spent = sum(convert_cents(e.amount_cents, e.currency, base) for e in expenses)
 
     by_category: dict[str, int] = {}
+    monthly_spent: dict[str, int] = {}
     for e in expenses:
-        by_category[e.category] = by_category.get(e.category, 0) + convert_cents(
-            e.amount_cents, e.currency, base
-        )
+        converted = convert_cents(e.amount_cents, e.currency, base)
+        by_category[e.category] = by_category.get(e.category, 0) + converted
+        month = e.expense_date[:7]
+        monthly_spent[month] = monthly_spent.get(month, 0) + converted
 
     per_member_paid: dict[int, int] = {}
     per_member_share: dict[int, int] = {}
     for e in expenses:
-        factor = convert_cents(e.amount_cents, e.currency, base) / e.amount_cents if e.amount_cents else 1
         for p in e.payers:
-            per_member_paid[p.user_id] = per_member_paid.get(p.user_id, 0) + round(p.amount_cents * factor)
+            per_member_paid[p.user_id] = per_member_paid.get(p.user_id, 0) + convert_cents(
+                p.amount_cents, e.currency, base
+            )
         for p in e.participants:
-            per_member_share[p.user_id] = per_member_share.get(p.user_id, 0) + round(p.share_cents * factor)
+            per_member_share[p.user_id] = per_member_share.get(p.user_id, 0) + convert_cents(
+                p.share_cents, e.currency, base
+            )
 
     members = _members(db, group_id)
     member_rows = []
@@ -69,9 +76,17 @@ def group_stats(
         month = e.expense_date[:7]
         bucket = months.setdefault(month, {})
         for p in e.payers:
-            bucket[p.user_id] = bucket.get(p.user_id, 0) + p.amount_cents
+            delta = convert_cents(p.amount_cents, e.currency, base)
+            bucket[p.user_id] = bucket.get(p.user_id, 0) + delta
         for p in e.participants:
-            bucket[p.user_id] = bucket.get(p.user_id, 0) - p.share_cents
+            delta = convert_cents(p.share_cents, e.currency, base)
+            bucket[p.user_id] = bucket.get(p.user_id, 0) - delta
+    for p in payments:
+        month = p.created_at[:7]
+        bucket = months.setdefault(month, {})
+        delta = convert_cents(p.amount_cents, p.currency, base)
+        bucket[p.from_user_id] = bucket.get(p.from_user_id, 0) + delta
+        bucket[p.to_user_id] = bucket.get(p.to_user_id, 0) - delta
     running: dict[int, int] = {}
     balance_over_time = []
     for month in sorted(months):
@@ -89,6 +104,10 @@ def group_stats(
         "currency": base,
         "total_spent_cents": total_spent,
         "expense_count": len(expenses),
+        "monthly_spent": [
+            {"month": m, "amount_cents": v}
+            for m, v in sorted(monthly_spent.items())
+        ],
         "by_category": [
             {"category": k, "amount_cents": v} for k, v in sorted(by_category.items(), key=lambda x: -x[1])
         ],

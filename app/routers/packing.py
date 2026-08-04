@@ -56,15 +56,18 @@ def add_item(
     db.add(item)
     db.commit()
     db.refresh(item)
-    # Send email/SMS notification
+    # Send email/SMS notification (to the assigned member, or everyone if unassigned)
     from ..models import Group
     grp = db.get(Group, group_id)
-    member_ids_list = group_member_ids(db, group_id)
+    if payload.assigned_to is not None:
+        member_ids_list = [payload.assigned_to]
+    else:
+        member_ids_list = group_member_ids(db, group_id)
     members = []
     for uid in member_ids_list:
         u = db.get(User, uid)
         if u and u.email:
-            members.append({"email": u.email})
+            members.append({"email": u.email, "name": u.name})
     if grp:
         notify_packing_item_added(grp.name, item.name, members)
     return _serialize(item)

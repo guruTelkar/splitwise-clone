@@ -302,7 +302,11 @@ def notify_member_added(group_name: str, added_user_name: str, members: list[dic
 
 def notify_packing_item_added(group_name: str, item_name: str, members: list[dict]) -> None:
     for m in members:
-        send_email(m["email"], f"Packing item added in {group_name}", f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em>.</p>")
+        if len(members) == 1:
+            body = f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em> and is assigned to you.</p>"
+        else:
+            body = f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em> for everyone in the group.</p>"
+        send_email(m["email"], f"Packing item added in {group_name}", body)
 
 
 def notify_packing_item_toggled(group_name: str, item_name: str, is_checked: bool, toggled_by_name: str, members: list[dict]) -> None:

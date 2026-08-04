@@ -29,7 +29,12 @@ from ..service import (
     notify,
     serialize_expense,
 )
-from ..notifications import notify_expense_added, notify_comment_added
+from ..notifications import (
+    notify_comment_added,
+    notify_expense_added,
+    notify_expense_deleted,
+    notify_expense_updated,
+)
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 recurring_router = APIRouter(prefix="/recurring", tags=["recurring"])
@@ -181,7 +186,12 @@ def create_expense(
     notify_expense_added(
         group_name or "Direct",
         expense.description,
-        [{"email": p.email, "mobile": p.mobile} for p in participants if p and p.email],
+        expense.amount_cents,
+        expense.currency,
+        expense.category or "General",
+        user.name,
+        expense.expense_date,
+        [{"email": p.email, "mobile": p.mobile, "name": p.name} for p in participants if p and p.email],
     )
     return serialize_expense(expense)
 
@@ -271,6 +281,26 @@ def update_expense(
         {"expense_id": expense.id, "description": expense.description},
     )
     db.commit()
+    # Send email notifications to participants
+    update_members = [
+        {"email": u.email, "name": u.name}
+        for ep in expense.participants
+        if (u := db.get(User, ep.user_id)) and u.email and u.id != user.id
+    ]
+    if update_members:
+        ug_name = ""
+        if expense.group_id:
+            ug = db.get(Group, expense.group_id)
+            if ug:
+                ug_name = ug.name
+        notify_expense_updated(
+            ug_name or "Direct",
+            expense.description,
+            expense.amount_cents,
+            expense.currency,
+            user.name,
+            update_members,
+        )
     return serialize_expense(expense)
 
 
@@ -295,8 +325,30 @@ def delete_expense(
         "expense_deleted",
         {"description": expense.description, "amount_cents": expense.amount_cents, "currency": expense.currency},
     )
+    del_members = [
+        {"email": u.email, "name": u.name}
+        for ep in expense.participants
+        if (u := db.get(User, ep.user_id)) and u.email and u.id != user.id
+    ]
+    del_desc = expense.description
+    del_amount = expense.amount_cents
+    del_currency = expense.currency
+    del_group_name = ""
+    if expense.group_id:
+        dg = db.get(Group, expense.group_id)
+        if dg:
+            del_group_name = dg.name
     db.delete(expense)
     db.commit()
+    if del_members:
+        notify_expense_deleted(
+            del_group_name or "Direct",
+            del_desc,
+            del_amount,
+            del_currency,
+            user.name,
+            del_members,
+        )
     return {"ok": True}
 
 
@@ -321,9 +373,16 @@ def add_comment(
     for ep in participants:
         u = db.get(User, ep.user_id)
         if u and u.email and u.id != user.id:
-            notif_members.append({"email": u.email})
+            notif_members.append({"email": u.email, "name": u.name})
     if notif_members:
-        notify_comment_added(expense.description, user.name, notif_members)
+        notify_comment_added(
+            expense.description,
+            expense.amount_cents,
+            expense.currency,
+            user.name,
+            payload.text.strip(),
+            notif_members,
+        )
     return {
         "id": comment.id,
         "user_id": comment.user_id,

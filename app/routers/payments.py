@@ -78,10 +78,9 @@ def _create_payment(
     db.commit()
     # Send email/SMS notification
     if payer and payee and payer.email and payee.email:
-        amt = f"{payment.amount_cents / 100:.2f} {payment.currency}"
         notify_payment_recorded(
             payer.name or "Someone", payee.name or "Someone",
-            amt, payer.email, payee.email,
+            payment.amount_cents, payment.currency, payer.email, payee.email,
         )
     return _serialize(payment)
 

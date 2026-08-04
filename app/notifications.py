@@ -10,6 +10,7 @@ import base64
 import logging
 import smtplib
 import socket
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -232,13 +233,65 @@ def send_otp_sms(to: str, code: str, purpose: str = "verification") -> bool:
     return send_sms(to, body)
 
 
-def notify_expense_added(group_name: str, expense_desc: str, members: list[dict]) -> None:
+def _money(cents: int, currency: str) -> str:
+    return f"{cents / 100:,.2f} {currency}"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _html_body(heading: str, rows: list[tuple[str, str]], note: str = "") -> str:
+    """Build a compact HTML email body with a key/value info table."""
+    rows_html = "".join(
+        f"<tr>"
+        f'<td style="padding:6px 12px;color:#666;font-size:13px;white-space:nowrap;">{k}</td>'
+        f'<td style="padding:6px 12px;font-weight:600;color:#1A1C1E;text-align:right;">{v}</td>'
+        f"</tr>"
+        for k, v in rows
+    )
+    note_html = f'<p style="color:#999;font-size:12px;margin-top:14px;">{note}</p>' if note else ""
+    return (
+        '<div style="font-family:-apple-system,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+        'max-width:520px;margin:0 auto;border:1px solid #e6e6e6;border-radius:12px;overflow:hidden;">'
+        '<div style="background:#00BFA5;padding:16px 20px;">'
+        '<div style="font-size:17px;font-weight:700;color:#ffffff;">Splitwise Clone</div>'
+        "</div>"
+        '<div style="padding:20px 20px 12px;">'
+        f'<h2 style="margin:0;font-size:16px;color:#1A1C1E;">{heading}</h2>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:8px;">{rows_html}</table>'
+        f"{note_html}</div>"
+        '<div style="background:#f7f7f7;padding:12px 20px;font-size:12px;color:#999;">'
+        "You are receiving this because you use the Splitwise Clone app.</div></div>"
+    )
+
+
+def notify_expense_added(
+    group_name: str,
+    expense_desc: str,
+    amount_cents: int,
+    currency: str,
+    category: str,
+    added_by_name: str,
+    expense_date: str,
+    members: list[dict],
+) -> None:
     """Notify group members about a new expense (email + in-app)."""
     for m in members:
         send_email(
             m["email"],
-            f"New expense in {group_name}",
-            f"<p><strong>{expense_desc}</strong> was added to <em>{group_name}</em>.</p>",
+            f"New expense in {group_name}: {expense_desc}",
+            _html_body(
+                f"New expense in {group_name}",
+                [
+                    ("Description", expense_desc),
+                    ("Amount", _money(amount_cents, currency)),
+                    ("Category", category),
+                    ("Added by", added_by_name),
+                    ("Date", expense_date),
+                ],
+                note="Open the app to see your share and settle up.",
+            ),
         )
 
 
@@ -248,7 +301,15 @@ def notify_group_created(group_name: str, members: list[dict], creator_name: str
         send_email(
             m["email"],
             f"You've been added to {group_name}",
-            f"<p><strong>{creator_name}</strong> created the group <em>{group_name}</em> and added you.</p>",
+            _html_body(
+                f"New group: {group_name}",
+                [
+                    ("Group", group_name),
+                    ("Created by", creator_name),
+                    ("Group members", f"{len(members)} (including you)"),
+                ],
+                note="Start splitting expenses with this group in the app.",
+            ),
         )
 
 
@@ -257,59 +318,178 @@ def notify_friend_added(friend_email: str, added_by_name: str) -> None:
     send_email(
         friend_email,
         f"{added_by_name} added you as a friend",
-        f"<p><strong>{added_by_name}</strong> added you as a friend on Splitwise Clone.</p>",
+        _html_body(
+            "You have a new friend",
+            [("Added by", added_by_name), ("Status", "Connected")],
+            note="You can now split expenses with each other.",
+        ),
     )
 
 
-def notify_payment_recorded(from_name: str, to_name: str, amount: str, from_email: str, to_email: str) -> None:
+def notify_payment_recorded(from_name: str, to_name: str, amount_cents: int, currency: str, from_email: str, to_email: str) -> None:
     """Notify both parties about a settlement."""
+    amount = _money(amount_cents, currency)
+    now = _utc_now()
     send_email(
         from_email,
         f"Payment recorded to {to_name}",
-        f"<p>You recorded a payment of <strong>{amount}</strong> to {to_name}.</p>",
+        _html_body(
+            "Payment recorded",
+            [("You paid", f"{amount} to {to_name}"), ("Date", now), ("Status", "Settlement recorded")],
+            note="The balance in your app has been updated.",
+        ),
     )
     send_email(
         to_email,
         f"Payment received from {from_name}",
-        f"<p>{from_name} recorded a payment of <strong>{amount}</strong> to you.</p>",
+        _html_body(
+            "Payment received",
+            [("Received", f"{amount} from {from_name}"), ("Date", now), ("Status", "Settlement recorded")],
+            note="The balance in your app has been updated.",
+        ),
     )
 
 
-def notify_expense_updated(group_name: str, expense_desc: str, members: list[dict]) -> None:
+def notify_expense_updated(
+    group_name: str,
+    expense_desc: str,
+    amount_cents: int,
+    currency: str,
+    updated_by_name: str,
+    members: list[dict],
+) -> None:
     for m in members:
-        send_email(m["email"], f"Expense updated in {group_name}", f"<p><strong>{expense_desc}</strong> was updated in <em>{group_name}</em>.</p>")
+        send_email(
+            m["email"],
+            f"Expense updated in {group_name}: {expense_desc}",
+            _html_body(
+                f"Expense updated in {group_name}",
+                [
+                    ("Description", expense_desc),
+                    ("Amount", _money(amount_cents, currency)),
+                    ("Updated by", updated_by_name),
+                ],
+                note="Open the app to review the updated expense.",
+            ),
+        )
 
 
-def notify_expense_deleted(group_name: str, expense_desc: str, members: list[dict]) -> None:
+def notify_expense_deleted(
+    group_name: str,
+    expense_desc: str,
+    amount_cents: int,
+    currency: str,
+    deleted_by_name: str,
+    members: list[dict],
+) -> None:
     for m in members:
-        send_email(m["email"], f"Expense removed from {group_name}", f"<p><strong>{expense_desc}</strong> was deleted from <em>{group_name}</em>.</p>")
+        send_email(
+            m["email"],
+            f"Expense removed from {group_name}",
+            _html_body(
+                f"Expense removed from {group_name}",
+                [
+                    ("Description", expense_desc),
+                    ("Amount", _money(amount_cents, currency)),
+                    ("Removed by", deleted_by_name),
+                ],
+                note="This expense is no longer part of the group balances.",
+            ),
+        )
 
 
-def notify_comment_added(expense_desc: str, commenter_name: str, members: list[dict]) -> None:
+def notify_comment_added(
+    expense_desc: str,
+    amount_cents: int,
+    currency: str,
+    commenter_name: str,
+    comment_text: str,
+    members: list[dict],
+) -> None:
     for m in members:
-        send_email(m["email"], f"New comment on {expense_desc}", f"<p><strong>{commenter_name}</strong> commented on <em>{expense_desc}</em>.</p>")
+        send_email(
+            m["email"],
+            f"New comment on {expense_desc}",
+            _html_body(
+                f"New comment",
+                [
+                    ("Expense", expense_desc),
+                    ("Amount", _money(amount_cents, currency)),
+                    ("Comment by", commenter_name),
+                    ("Comment", comment_text),
+                ],
+                note="Tap the comment in the app to reply.",
+            ),
+        )
 
 
 def notify_member_joined(group_name: str, joiner_name: str, members: list[dict]) -> None:
     for m in members:
-        send_email(m["email"], f"New member in {group_name}", f"<p><strong>{joiner_name}</strong> joined <em>{group_name}</em>.</p>")
+        send_email(
+            m["email"],
+            f"New member in {group_name}",
+            _html_body(
+                f"New member in {group_name}",
+                [
+                    ("Group", group_name),
+                    ("New member", joiner_name),
+                    ("Joined", _utc_now()),
+                ],
+            ),
+        )
 
 
 def notify_member_added(group_name: str, added_user_name: str, members: list[dict]) -> None:
     for m in members:
-        send_email(m["email"], f"You were added to {group_name}", f"<p>You were added to <em>{group_name}</em> by {added_user_name}.</p>")
+        send_email(
+            m["email"],
+            f"You were added to {group_name}",
+            _html_body(
+                f"New group membership",
+                [("Group", group_name), ("Added by", added_user_name), ("Date", _utc_now())],
+                note="Open the app to see the group.",
+            ),
+        )
 
 
 def notify_packing_item_added(group_name: str, item_name: str, members: list[dict]) -> None:
     for m in members:
         if len(members) == 1:
-            body = f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em> and is assigned to you.</p>"
+            heading = "Packing item assigned to you"
+            rows = [
+                ("Item", item_name),
+                ("Assigned to", m.get("name", "You")),
+                ("Group", group_name),
+            ]
         else:
-            body = f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em> for everyone in the group.</p>"
-        send_email(m["email"], f"Packing item added in {group_name}", body)
+            heading = f"Packing item added in {group_name}"
+            rows = [
+                ("Item", item_name),
+                ("Group", group_name),
+                ("For", "Everyone in the group"),
+            ]
+        send_email(
+            m["email"],
+            f"Packing item added in {group_name}",
+            _html_body(heading, rows, note="Check the packing list in the app."),
+        )
 
 
 def notify_packing_item_toggled(group_name: str, item_name: str, is_checked: bool, toggled_by_name: str, members: list[dict]) -> None:
-    status = "completed" if is_checked else "unchecked"
+    status = "completed" if is_checked else "pending"
+    label = "Completed" if is_checked else "Pending"
     for m in members:
-        send_email(m["email"], f"Packing item {status} in {group_name}", f"<p><strong>{toggled_by_name}</strong> marked <strong>{item_name}</strong> as {status} in <em>{group_name}</em>.</p>")
+        send_email(
+            m["email"],
+            f"Packing item {status} in {group_name}",
+            _html_body(
+                f"Packing item {status}",
+                [
+                    ("Item", item_name),
+                    ("Status", label),
+                    ("Changed by", toggled_by_name),
+                    ("Group", group_name),
+                ],
+                note="Check the packing list in the app.",
+            ),
+        )

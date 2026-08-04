@@ -25,19 +25,28 @@ from .routers import (
 
 
 def _run_startup_migrations():
-    """Lightweight SQLite migrations: add columns that may not exist yet."""
+    """Add columns that may not exist yet (handles both SQLite and PostgreSQL)."""
     with engine.connect() as conn:
+        dialect = conn.dialect.name
         try:
-            cols = {r[1] for r in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
-            if "mobile" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN mobile VARCHAR(20)"))
+            if dialect == "sqlite":
+                cols = {r[1] for r in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
+                if "mobile" not in cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN mobile VARCHAR(20)"))
+                    conn.commit()
+            else:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile VARCHAR(20)"))
                 conn.commit()
         except Exception:
             pass
         try:
-            cols = {r[1] for r in conn.execute(text("PRAGMA table_info(expenses)")).fetchall()}
-            if "location" not in cols:
-                conn.execute(text("ALTER TABLE expenses ADD COLUMN location VARCHAR(500)"))
+            if dialect == "sqlite":
+                cols = {r[1] for r in conn.execute(text("PRAGMA table_info(expenses)")).fetchall()}
+                if "location" not in cols:
+                    conn.execute(text("ALTER TABLE expenses ADD COLUMN location VARCHAR(500)"))
+                    conn.commit()
+            else:
+                conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS location VARCHAR(500)"))
                 conn.commit()
         except Exception:
             pass

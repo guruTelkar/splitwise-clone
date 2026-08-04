@@ -3,12 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=6, max_length=128)
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -28,12 +22,13 @@ class UserUpdate(BaseModel):
 class AddFriendRequest(BaseModel):
     friend_id: int | None = None
     email: EmailStr | None = None
+    mobile: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def check_source(self):
-        if self.friend_id is None and self.email is None:
-            raise ValueError("Provide either friend_id or email")
+        if self.friend_id is None and self.email is None and self.mobile is None:
+            raise ValueError("Provide either friend_id, email, or mobile")
         return self
 
 
@@ -83,6 +78,7 @@ class CreateExpenseRequest(BaseModel):
     category: str = "General"
     notes: str | None = None
     receipt_url: str | None = None
+    location: str | None = None
     split_method: str = "equally"  # equally | amounts | percentages | shares | adjustment
     payers: list[PayerIn]
     participants: list[int]  # user_ids taking part in the split
@@ -140,3 +136,39 @@ class CreatePackingItemRequest(BaseModel):
 
 class ProRequest(BaseModel):
     enable: bool = True
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=6, max_length=128)
+    mobile: str | None = None
+
+
+class SendOtpRequest(BaseModel):
+    email: EmailStr | None = None
+    mobile: str | None = None
+    purpose: str = "register"  # register | forgot_password | forgot_userid | verify_email
+
+
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr | None = None
+    mobile: str | None = None
+    code: str = Field(min_length=4, max_length=8)
+    purpose: str = "register"
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr | None = None
+    mobile: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class ForgotUserIdRequest(BaseModel):
+    email: EmailStr | None = None
+    mobile: str | None = None

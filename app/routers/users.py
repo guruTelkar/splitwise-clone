@@ -42,7 +42,10 @@ def search_users(
     like = f"%{q.strip()}%"
     results = (
         db.query(User)
-        .filter(User.id != user.id, (User.name.ilike(like) | User.email.ilike(like)))
+        .filter(
+            User.id != user.id,
+            (User.name.ilike(like) | User.email.ilike(like) | User.mobile.ilike(like)),
+        )
         .limit(20)
         .all()
     )

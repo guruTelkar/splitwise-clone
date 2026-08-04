@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from .config import settings
 from .database import Base, engine
@@ -14,6 +15,7 @@ from .routers import (
     friends,
     groups,
     notifications,
+    otp,
     packing,
     payments,
     receipts,
@@ -22,9 +24,29 @@ from .routers import (
 )
 
 
+def _run_startup_migrations():
+    """Lightweight SQLite migrations: add columns that may not exist yet."""
+    with engine.connect() as conn:
+        try:
+            cols = {r[1] for r in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
+            if "mobile" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN mobile VARCHAR(20)"))
+                conn.commit()
+        except Exception:
+            pass
+        try:
+            cols = {r[1] for r in conn.execute(text("PRAGMA table_info(expenses)")).fetchall()}
+            if "location" not in cols:
+                conn.execute(text("ALTER TABLE expenses ADD COLUMN location VARCHAR(500)"))
+                conn.commit()
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _run_startup_migrations()
     yield
 
 
@@ -41,6 +63,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir)), name="uploads")
 
 app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(otp.router, prefix=settings.api_prefix)
 app.include_router(users.router, prefix=settings.api_prefix)
 app.include_router(friends.router, prefix=settings.api_prefix)
 app.include_router(groups.router, prefix=settings.api_prefix)

@@ -13,22 +13,30 @@ router = APIRouter(prefix="/friends", tags=["friends"])
 
 
 def _resolve_friend(
-    db: Session, me: User, friend_id: int | None, email: str | None, name: str | None
+    db: Session, me: User, friend_id: int | None, email: str | None, mobile: str | None, name: str | None
 ) -> User:
     if friend_id is not None:
         friend = db.get(User, friend_id)
         if friend is None:
             raise HTTPException(status_code=404, detail="User not found")
         return friend
-    email = email.lower().strip()
-    friend = db.query(User).filter(User.email == email).first()
+    if mobile:
+        friend = db.query(User).filter(User.mobile == mobile.strip()).first()
+        if friend is not None:
+            return friend
+    email = email.lower().strip() if email else None
+    if email:
+        friend = db.query(User).filter(User.email == email).first()
+    else:
+        friend = None
     if friend is None:
-        display = (name or email.split("@")[0]).strip() or email.split("@")[0]
+        display = (name or email or "Unknown").strip() or "Unknown"
         friend = User(
-            email=email,
+            email=email or f"placeholder_{mobile}@splitwise.local",
             name=display,
             password_hash=PLACEHOLDER_PASSWORD,
             base_currency=me.base_currency,
+            mobile=mobile.strip() if mobile else None,
         )
         db.add(friend)
         db.flush()
@@ -96,7 +104,7 @@ def add_friend(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    friend = _resolve_friend(db, user, payload.friend_id, payload.email, payload.name)
+    friend = _resolve_friend(db, user, payload.friend_id, payload.email, payload.mobile, payload.name)
     if friend.id == user.id:
         raise HTTPException(status_code=400, detail="You cannot add yourself as a friend")
     existing = (

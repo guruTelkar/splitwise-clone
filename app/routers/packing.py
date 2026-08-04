@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user, require_pro
+from ..deps import get_current_user
 from ..models import PackingItem, User
 from ..schemas import CreatePackingItemRequest
 from ..service import is_group_member
@@ -24,7 +24,7 @@ def _serialize(item: PackingItem) -> dict:
 @router.get("/group/{group_id}")
 def list_items(
     group_id: int,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not is_group_member(db, group_id, user.id):
@@ -42,7 +42,7 @@ def list_items(
 def add_item(
     group_id: int,
     payload: CreatePackingItemRequest,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not is_group_member(db, group_id, user.id):
@@ -61,7 +61,7 @@ def add_item(
 @router.put("/{item_id}")
 def toggle_item(
     item_id: int,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     item = db.get(PackingItem, item_id)
@@ -77,7 +77,7 @@ def toggle_item(
 @router.delete("/{item_id}")
 def delete_item(
     item_id: int,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     item = db.get(PackingItem, item_id)

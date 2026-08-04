@@ -115,10 +115,11 @@ def _build_expense(db: Session, user: User, payload: CreateExpenseRequest) -> Ex
         description=payload.description.strip(),
         amount_cents=amount_cents,
         currency=payload.currency,
-        expense_date=payload.date or datetime.now().strftime("%Y-%m-%d"),
+        expense_date=payload.date or datetime.now().strftime("%Y-%m-%d %H:%M"),
         category=payload.category or "General",
         notes=payload.notes,
         receipt_url=payload.receipt_url,
+        location=payload.location,
         created_by=user.id,
     )
     for payer in payload.payers:
@@ -229,10 +230,11 @@ def update_expense(
     expense.description = payload.description.strip()
     expense.amount_cents = amount_cents
     expense.currency = payload.currency
-    expense.expense_date = payload.date or datetime.now().strftime("%Y-%m-%d")
+    expense.expense_date = payload.date or datetime.now().strftime("%Y-%m-%d %H:%M")
     expense.category = payload.category or "General"
     expense.notes = payload.notes
     expense.receipt_url = payload.receipt_url
+    expense.location = payload.location
 
     expense.payers.clear()
     expense.participants.clear()

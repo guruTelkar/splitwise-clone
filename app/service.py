@@ -66,6 +66,7 @@ def serialize_user(user: User) -> dict:
         "name": user.name,
         "base_currency": user.base_currency,
         "avatar_url": user.avatar_url,
+        "mobile": user.mobile,
         "is_pro": user.is_pro,
     }
 
@@ -89,6 +90,7 @@ def serialize_expense(expense: Expense) -> dict:
         "category": expense.category,
         "notes": expense.notes,
         "receipt_url": expense.receipt_url,
+        "location": expense.location,
         "created_by": expense.created_by,
         "is_recurring": expense.is_recurring,
         "created_at": expense.created_at.isoformat(),

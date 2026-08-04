@@ -29,6 +29,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     base_currency: Mapped[str] = mapped_column(String(8), default="USD")
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    mobile: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     is_pro: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -95,10 +96,11 @@ class Expense(Base):
     description: Mapped[str] = mapped_column(String(300))
     amount_cents: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
-    expense_date: Mapped[str] = mapped_column(String(16), default=lambda: utcnow().strftime("%Y-%m-%d"))
+    expense_date: Mapped[str] = mapped_column(String(25), default=lambda: utcnow().strftime("%Y-%m-%d %H:%M"))
     category: Mapped[str] = mapped_column(String(60), default="General")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     receipt_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -233,4 +235,16 @@ class Reminder(Base):
     to_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     remind_date: Mapped[str] = mapped_column(String(16))
     message: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class OtpCode(Base):
+    __tablename__ = "otp_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    mobile: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    code: Mapped[str] = mapped_column(String(10))
+    purpose: Mapped[str] = mapped_column(String(40))  # register, forgot_password, forgot_userid, verify_email
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

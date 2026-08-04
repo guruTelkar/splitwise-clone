@@ -1,11 +1,14 @@
 """Email and SMS notification service.
 
-Uses Resend for email (free: 100/day, 3000/mo).
+Uses Gmail SMTP for email (free, delivers to any recipient).
 Uses Twilio for SMS (free trial: $15 credit).
-Falls back to console logging if no API keys are configured.
+Falls back to console logging if no SMTP credentials are configured.
 """
 
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import httpx
 
@@ -15,30 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Send an email via Resend. Returns True on success."""
-    api_key = settings.resend_api_key
-    if not api_key:
+    """Send an email via Gmail SMTP. Returns True on success."""
+    user = settings.smtp_user
+    password = settings.smtp_password
+    if not user or not password:
         logger.info(f"[EMAIL DISABLED] To: {to} | Subject: {subject}")
         print(f"[EMAIL] To: {to} | Subject: {subject} | Body: {html_body}")
         return False
     try:
-        resp = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "from": settings.email_from,
-                "to": [to],
-                "subject": subject,
-                "html": html_body,
-            },
-            timeout=15,
-        )
-        if resp.status_code < 300:
-            logger.info(f"Email sent to {to}: {resp.json()}")
-            return True
-        else:
-            logger.error(f"Resend error {resp.status_code}: {resp.text}")
-            return False
+        msg = MIMEMultipart("alternative")
+        msg["From"] = settings.email_from
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(user, password)
+            server.sendmail(settings.email_from, [to], msg.as_string())
+        logger.info(f"Email sent to {to}")
+        return True
     except Exception as e:
         logger.error(f"Email send failed: {e}")
         return False

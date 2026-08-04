@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     upload_dir: Path = DATA_DIR / "uploads"
     cors_origins: list[str] = ["*"]
 
-    # Email provider (Resend - free: 100/day, 3000/mo)
-    resend_api_key: str = ""
-    email_from: str = "Splitwise Clone <onboarding@resend.dev>"
+    # Email provider (Gmail SMTP - free, delivers to any recipient)
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = "splititup.support@gmail.com"
+    smtp_password: str = ""
+    email_from: str = "Splitwise Clone <splititup.support@gmail.com>"
 
     # SMS provider (Twilio - free trial: $15 credit)
     twilio_account_sid: str = ""

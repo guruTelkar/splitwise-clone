@@ -17,6 +17,7 @@ from ..service import (
     serialize_expense,
     serialize_user,
 )
+from ..notifications import notify_group_created, notify_member_joined
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -77,6 +78,13 @@ def create_group(
     db.refresh(group)
     create_activity(db, group.id, user.id, "group_created", {"name": group.name})
     db.commit()
+    # Send email/SMS notifications
+    members = []
+    for uid in member_ids:
+        u = db.get(User, uid)
+        if u and u.email:
+            members.append({"email": u.email, "mobile": u.mobile})
+    notify_group_created(group.name, members, user.name)
     return _serialize_group(db, group, user)
 
 
@@ -157,6 +165,10 @@ def join_group(
         db.commit()
         create_activity(db, group.id, user.id, "member_joined", {"name": user.name})
         db.commit()
+        # Notify existing members about new joiner
+        member_ids_list = group_member_ids(db, group.id)
+        members = [{"email": u.email} for uid in member_ids_list if (u := db.get(User, uid)) and u.email and u.id != user.id]
+        notify_member_joined(group.name, user.name, members)
     return _serialize_group(db, group, user)
 
 

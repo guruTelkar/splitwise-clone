@@ -6,6 +6,7 @@ from ..deps import get_current_user
 from ..models import Group, Payment, User
 from ..schemas import CreatePaymentRequest
 from ..service import create_activity, is_group_member, notify
+from ..notifications import notify_payment_recorded
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -75,6 +76,13 @@ def _create_payment(
             f"payment/{payment.id}",
         )
     db.commit()
+    # Send email/SMS notification
+    if payer and payee and payer.email and payee.email:
+        amt = f"{payment.amount_cents / 100:.2f} {payment.currency}"
+        notify_payment_recorded(
+            payer.name or "Someone", payee.name or "Someone",
+            amt, payer.email, payee.email,
+        )
     return _serialize(payment)
 
 

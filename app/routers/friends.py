@@ -7,7 +7,8 @@ from ..deps import get_current_user
 from ..models import Expense, FriendLink, Payment, User
 from ..schemas import AddFriendRequest
 from ..security import PLACEHOLDER_PASSWORD
-from ..service import serialize_expense, serialize_user
+from ..service import serialize_expense, serialize_user, notify
+from ..notifications import notify_friend_added
 
 router = APIRouter(prefix="/friends", tags=["friends"])
 
@@ -125,6 +126,9 @@ def add_friend(
     db.add(FriendLink(user_id=user.id, friend_id=friend.id))
     db.commit()
     db.refresh(friend)
+    # Send email notification
+    if friend.email:
+        notify_friend_added(friend.email, user.name)
     return {"friend": serialize_user(friend), "balance_cents": 0}
 
 

@@ -153,3 +153,39 @@ def notify_payment_recorded(from_name: str, to_name: str, amount: str, from_emai
         f"Payment received from {from_name}",
         f"<p>{from_name} recorded a payment of <strong>{amount}</strong> to you.</p>",
     )
+
+
+def notify_expense_updated(group_name: str, expense_desc: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"Expense updated in {group_name}", f"<p><strong>{expense_desc}</strong> was updated in <em>{group_name}</em>.</p>")
+
+
+def notify_expense_deleted(group_name: str, expense_desc: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"Expense removed from {group_name}", f"<p><strong>{expense_desc}</strong> was deleted from <em>{group_name}</em>.</p>")
+
+
+def notify_comment_added(expense_desc: str, commenter_name: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"New comment on {expense_desc}", f"<p><strong>{commenter_name}</strong> commented on <em>{expense_desc}</em>.</p>")
+
+
+def notify_member_joined(group_name: str, joiner_name: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"New member in {group_name}", f"<p><strong>{joiner_name}</strong> joined <em>{group_name}</em>.</p>")
+
+
+def notify_member_added(group_name: str, added_user_name: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"You were added to {group_name}", f"<p>You were added to <em>{group_name}</em> by {added_user_name}.</p>")
+
+
+def notify_packing_item_added(group_name: str, item_name: str, members: list[dict]) -> None:
+    for m in members:
+        send_email(m["email"], f"Packing item added in {group_name}", f"<p><strong>{item_name}</strong> was added to the packing list for <em>{group_name}</em>.</p>")
+
+
+def notify_packing_item_toggled(group_name: str, item_name: str, is_checked: bool, toggled_by_name: str, members: list[dict]) -> None:
+    status = "completed" if is_checked else "unchecked"
+    for m in members:
+        send_email(m["email"], f"Packing item {status} in {group_name}", f"<p><strong>{toggled_by_name}</strong> marked <strong>{item_name}</strong> as {status} in <em>{group_name}</em>.</p>")

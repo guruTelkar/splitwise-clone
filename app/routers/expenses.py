@@ -29,6 +29,7 @@ from ..service import (
     notify,
     serialize_expense,
 )
+from ..notifications import notify_expense_added, notify_comment_added
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 recurring_router = APIRouter(prefix="/recurring", tags=["recurring"])
@@ -171,6 +172,17 @@ def create_expense(
                 f"expense/{expense.id}",
             )
     db.commit()
+    # Send email/SMS notifications
+    group_name = ""
+    if expense.group_id:
+        grp = db.get(Group, expense.group_id)
+        if grp:
+            group_name = grp.name
+    notify_expense_added(
+        group_name or "Direct",
+        expense.description,
+        [{"email": p.email, "mobile": p.mobile} for p in participants if p and p.email],
+    )
     return serialize_expense(expense)
 
 
@@ -303,6 +315,15 @@ def add_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+    # Notify expense participants about new comment
+    participants = db.query(ExpenseParticipant).filter(ExpenseParticipant.expense_id == expense_id).all()
+    notif_members = []
+    for ep in participants:
+        u = db.get(User, ep.user_id)
+        if u and u.email and u.id != user.id:
+            notif_members.append({"email": u.email})
+    if notif_members:
+        notify_comment_added(expense.description, user.name, notif_members)
     return {
         "id": comment.id,
         "user_id": comment.user_id,

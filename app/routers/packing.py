@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import PackingItem, User
+from ..models import PackingItem
 from ..schemas import CreatePackingItemRequest
-from ..service import is_group_member
+from ..service import is_group_member, group_member_ids
+from ..notifications import notify_packing_item_added, notify_packing_item_toggled
 
 router = APIRouter(prefix="/packing", tags=["packing"])
 
@@ -55,6 +56,17 @@ def add_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    # Send email/SMS notification
+    from ..models import Group, User
+    grp = db.get(Group, group_id)
+    member_ids_list = group_member_ids(db, group_id)
+    members = []
+    for uid in member_ids_list:
+        u = db.get(User, uid)
+        if u and u.email:
+            members.append({"email": u.email})
+    if grp:
+        notify_packing_item_added(grp.name, item.name, members)
     return _serialize(item)
 
 
@@ -71,6 +83,13 @@ def toggle_item(
         raise HTTPException(status_code=403, detail="Not a member of this group")
     item.is_checked = not item.is_checked
     db.commit()
+    # Send email/SMS notification
+    from ..models import Group, User
+    grp = db.get(Group, item.group_id)
+    member_ids_list = group_member_ids(db, item.group_id)
+    members = [{"email": u.email} for uid in member_ids_list if (u := db.get(User, uid)) and u.email]
+    if grp:
+        notify_packing_item_toggled(grp.name, item.name, item.is_checked, user.name, members)
     return _serialize(item)
 
 

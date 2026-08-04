@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..balance import balance_for_expenses, simplify_debts
 from ..database import get_db
-from ..deps import get_current_user, require_pro
+from ..deps import get_current_user
 from ..models import Expense, Group, GroupMember, Payment, User
 from ..service import convert_cents, get_group_or_404, is_group_member
 
@@ -21,7 +21,7 @@ def _members(db: Session, group_id: int) -> list[User]:
 @router.get("/group/{group_id}")
 def group_stats(
     group_id: int,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not is_group_member(db, group_id, user.id):

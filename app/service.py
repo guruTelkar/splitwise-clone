@@ -55,7 +55,8 @@ def is_group_member(db: Session, group_id: int, user_id: int) -> bool:
 def get_group_or_404(db: Session, group_id: int) -> Group:
     group = db.get(Group, group_id)
     if group is None:
-        raise LookupError("Group not found")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Group not found")
     return group
 
 

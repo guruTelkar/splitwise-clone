@@ -142,7 +142,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=6, max_length=128)
-    mobile: str | None = None
+    mobile: str = Field(min_length=8, max_length=20)
 
 
 class SendOtpRequest(BaseModel):

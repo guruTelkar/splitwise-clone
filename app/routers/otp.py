@@ -13,18 +13,17 @@ from ..models import OtpCode, User
 from ..schemas import (
     ForgotPasswordRequest,
     ForgotUserIdRequest,
-    RegisterRequest,
     ResetPasswordRequest,
     SendOtpRequest,
     VerifyOtpRequest,
 )
-from ..security import create_access_token, hash_password, is_placeholder, verify_password
+from ..security import hash_password, verify_password
 from ..service import serialize_user
 
 router = APIRouter(prefix="/auth", tags=["otp"])
 
-# In-memory OTP store (for demo: log OTP to console; production would use SMTP/SMS)
-_otp_store: dict[str, dict] = {}
+RESEND_COOLDOWN_SECONDS = 30
+OTP_EXPIRY_MINUTES = 10
 
 
 def _generate_code(length: int = 6) -> str:
@@ -41,15 +40,30 @@ def _store_otp(db: Session, email: str | None, mobile: str | None, purpose: str)
     )
     db.add(otp)
     db.commit()
-    # For demo, log the OTP (production would send via SMTP/SMS)
-    target = email or mobile
-    print(f"[OTP] {purpose} -> {target}: {code}")
     return code
 
 
-def _verify_otp(
+def _check_cooldown(db: Session, email: str | None, mobile: str | None, purpose: str) -> float:
+    """Return seconds remaining until cooldown expires. 0 means OK to send."""
+    q = db.query(OtpCode).filter(OtpCode.purpose == purpose)
+    if email:
+        q = q.filter(OtpCode.email == email.lower().strip())
+    elif mobile:
+        q = q.filter(OtpCode.mobile == mobile.strip())
+    else:
+        return 0
+    last = q.order_by(OtpCode.id.desc()).first()
+    if last is None:
+        return 0
+    elapsed = (datetime.now(timezone.utc) - last.created_at.replace(tzinfo=timezone.utc)).total_seconds()
+    remaining = RESEND_COOLDOWN_SECONDS - elapsed
+    return max(0.0, remaining)
+
+
+def verify_otp_code(
     db: Session, email: str | None, mobile: str | None, code: str, purpose: str
 ) -> bool:
+    """Verify an OTP code. Returns True if valid and not expired."""
     q = db.query(OtpCode).filter(
         OtpCode.purpose == purpose,
         OtpCode.used == False,
@@ -63,9 +77,8 @@ def _verify_otp(
     otp = q.order_by(OtpCode.id.desc()).first()
     if otp is None:
         return False
-    # Allow 10 minutes
     age = datetime.now(timezone.utc) - otp.created_at.replace(tzinfo=timezone.utc)
-    if age > timedelta(minutes=10):
+    if age > timedelta(minutes=OTP_EXPIRY_MINUTES):
         return False
     if otp.code != code:
         return False
@@ -74,11 +87,45 @@ def _verify_otp(
     return True
 
 
+def is_recently_verified(db: Session, email: str, purpose: str) -> bool:
+    """Check if there's a recently used (verified) OTP for this email+purpose within expiry window."""
+    q = db.query(OtpCode).filter(
+        OtpCode.purpose == purpose,
+        OtpCode.used == True,
+        OtpCode.email == email.lower().strip(),
+    )
+    otp = q.order_by(OtpCode.id.desc()).first()
+    if otp is None:
+        return False
+    age = datetime.now(timezone.utc) - otp.created_at.replace(tzinfo=timezone.utc)
+    return age <= timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+
+def is_recently_verified_mobile(db: Session, mobile: str, purpose: str) -> bool:
+    """Check if there's a recently used (verified) OTP for this mobile+purpose within expiry window."""
+    q = db.query(OtpCode).filter(
+        OtpCode.purpose == purpose,
+        OtpCode.used == True,
+        OtpCode.mobile == mobile.strip(),
+    )
+    otp = q.order_by(OtpCode.id.desc()).first()
+    if otp is None:
+        return False
+    age = datetime.now(timezone.utc) - otp.created_at.replace(tzinfo=timezone.utc)
+    return age <= timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+
 @router.post("/send-otp")
 def send_otp(payload: SendOtpRequest, db: Session = Depends(get_db)):
     if not payload.email and not payload.mobile:
         raise HTTPException(status_code=400, detail="Provide email or mobile")
     target = payload.email or payload.mobile
+    cooldown = _check_cooldown(db, payload.email, payload.mobile, payload.purpose)
+    if cooldown > 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Please wait {int(cooldown)} seconds before requesting another OTP",
+        )
     code = _store_otp(db, payload.email, payload.mobile, payload.purpose)
     return {"message": f"OTP sent to {target}", "hint": code}
 
@@ -87,7 +134,9 @@ def send_otp(payload: SendOtpRequest, db: Session = Depends(get_db)):
 def verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
     if not payload.email and not payload.mobile:
         raise HTTPException(status_code=400, detail="Provide email or mobile")
-    ok = _verify_otp(db, payload.email, payload.mobile, payload.code, payload.purpose)
+    if not payload.code or not payload.code.strip():
+        raise HTTPException(status_code=400, detail="OTP code is required")
+    ok = verify_otp_code(db, payload.email, payload.mobile, payload.code.strip(), payload.purpose)
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
     return {"verified": True}
@@ -110,7 +159,7 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
 
 @router.post("/reset-password")
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
-    ok = _verify_otp(db, payload.email, None, payload.code, "forgot_password")
+    ok = verify_otp_code(db, payload.email, None, payload.code, "forgot_password")
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid or expired reset code")
     user = db.query(User).filter(User.email == payload.email.lower().strip()).first()

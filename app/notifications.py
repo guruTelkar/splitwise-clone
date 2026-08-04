@@ -7,6 +7,7 @@ Falls back to console logging if no SMTP credentials are configured.
 
 import logging
 import smtplib
+import socket
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -17,6 +18,74 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
+def _connect_smtp_socket(host: str, port: int) -> socket.socket:
+    """Connect to the SMTP server, preferring IPv4.
+
+    Free Render instances have no IPv6 route, but smtplib's socket lookup
+    returns IPv6 addresses first, producing '[Errno 101] Network is
+    unreachable'. Trying IPv4 first avoids that.
+    """
+    last_err: Exception | None = None
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            addrinfos = socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            last_err = e
+            continue
+        for addr in addrinfos:
+            sock = socket.socket(family, addr[1])
+            sock.settimeout(20)
+            try:
+                sock.connect(addr[4])
+                return sock
+            except OSError as e:
+                last_err = e
+                sock.close()
+    raise OSError(f"Could not connect to SMTP {host}:{port} ({last_err})")
+
+
+def _build_message(to: str, subject: str, html_body: str) -> MIMEMultipart:
+    msg = MIMEMultipart("alternative")
+    msg["From"] = settings.email_from
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    return msg
+
+
+def _send_via_smtp_587(user: str, password: str, msg: MIMEMultipart, to: str) -> None:
+    """STARTTLS over port 587, forcing an IPv4 socket."""
+    server = smtplib.SMTP(timeout=20)
+    server._get_socket = lambda host, port, timeout: _connect_smtp_socket(  # noqa: SLF001
+        host, port
+    )
+    try:
+        server.connect(settings.smtp_host, settings.smtp_port)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(user, password)
+        server.sendmail(settings.email_from, [to], msg.as_string())
+    finally:
+        try:
+            server.quit()
+        except Exception:
+            pass
+
+
+def _send_via_smtp_465(user: str, password: str, msg: MIMEMultipart, to: str) -> None:
+    """SSL over port 465 (fallback if 587 is blocked)."""
+    server = smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20)
+    try:
+        server.login(user, password)
+        server.sendmail(settings.email_from, [to], msg.as_string())
+    finally:
+        try:
+            server.quit()
+        except Exception:
+            pass
+
+
 def send_email(to: str, subject: str, html_body: str) -> bool:
     """Send an email via Gmail SMTP. Returns True on success."""
     user = settings.smtp_user
@@ -25,23 +94,19 @@ def send_email(to: str, subject: str, html_body: str) -> bool:
         logger.info(f"[EMAIL DISABLED] To: {to} | Subject: {subject}")
         print(f"[EMAIL] To: {to} | Subject: {subject} | Body: {html_body}")
         return False
+    msg = _build_message(to, subject, html_body)
     try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = settings.email_from
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(user, password)
-            server.sendmail(settings.email_from, [to], msg.as_string())
-        logger.info(f"Email sent to {to}")
+        _send_via_smtp_587(user, password, msg, to)
+        logger.info(f"Email sent to {to} (587 STARTTLS)")
         return True
-    except Exception as e:
-        logger.error(f"Email send failed: {e}")
-        return False
+    except Exception as e587:
+        try:
+            _send_via_smtp_465(user, password, msg, to)
+            logger.info(f"Email sent to {to} (465 SSL fallback)")
+            return True
+        except Exception as e465:
+            logger.error(f"Email send failed (587: {e587}) (465: {e465})")
+            return False
 
 
 def send_sms(to: str, body: str) -> bool:

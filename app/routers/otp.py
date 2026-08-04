@@ -31,7 +31,8 @@ def _generate_code(length: int = 6) -> str:
     return "".join(random.choices(string.digits, k=length))
 
 
-def _store_otp(db: Session, email: str | None, mobile: str | None, purpose: str) -> str:
+def _store_otp(db: Session, email: str | None, mobile: str | None, purpose: str) -> tuple[str, bool]:
+    """Store an OTP and attempt delivery. Returns (code, email_delivered)."""
     code = _generate_code()
     otp = OtpCode(
         email=email.lower().strip() if email else None,
@@ -42,11 +43,12 @@ def _store_otp(db: Session, email: str | None, mobile: str | None, purpose: str)
     db.add(otp)
     db.commit()
     # Send OTP via email and/or SMS
+    delivered = False
     if email:
-        send_otp_email(email, code, purpose)
+        delivered = send_otp_email(email, code, purpose)
     if mobile:
         send_otp_sms(mobile, code, purpose)
-    return code
+    return code, delivered
 
 
 def _check_cooldown(db: Session, email: str | None, mobile: str | None, purpose: str) -> float:
@@ -132,8 +134,8 @@ def send_otp(payload: SendOtpRequest, db: Session = Depends(get_db)):
             status_code=429,
             detail=f"Please wait {int(cooldown)} seconds before requesting another OTP",
         )
-    code = _store_otp(db, payload.email, payload.mobile, payload.purpose)
-    return {"message": f"OTP sent to {target}", "hint": code}
+    code, delivered = _store_otp(db, payload.email, payload.mobile, payload.purpose)
+    return {"message": f"OTP sent to {target}", "hint": code, "email_delivered": delivered}
 
 
 @router.post("/verify-otp")
@@ -159,8 +161,8 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
         user = db.query(User).filter(User.mobile == payload.mobile.strip()).first()
     if user is None:
         return {"message": "If an account exists, a reset code has been sent."}
-    code = _store_otp(db, user.email, user.mobile, "forgot_password")
-    return {"message": "Reset code sent", "hint": code}
+    code, delivered = _store_otp(db, user.email, user.mobile, "forgot_password")
+    return {"message": "Reset code sent", "hint": code, "email_delivered": delivered}
 
 
 @router.post("/reset-password")
@@ -187,5 +189,5 @@ def forgot_userid(payload: ForgotUserIdRequest, db: Session = Depends(get_db)):
         user = db.query(User).filter(User.mobile == payload.mobile.strip()).first()
     if user is None:
         return {"message": "If an account exists, user ID has been sent to your contact."}
-    code = _store_otp(db, user.email, user.mobile, "forgot_userid")
-    return {"message": f"User ID info sent. Your user ID is {user.id}", "user_id": user.id, "hint": code}
+    code, delivered = _store_otp(db, user.email, user.mobile, "forgot_userid")
+    return {"message": f"User ID info sent. Your user ID is {user.id}", "user_id": user.id, "hint": code, "email_delivered": delivered}

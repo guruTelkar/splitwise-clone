@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import OtpCode, User
+from ..notifications import send_otp_email, send_otp_sms
 from ..schemas import (
     ForgotPasswordRequest,
     ForgotUserIdRequest,
@@ -40,6 +41,11 @@ def _store_otp(db: Session, email: str | None, mobile: str | None, purpose: str)
     )
     db.add(otp)
     db.commit()
+    # Send OTP via email and/or SMS
+    if email:
+        send_otp_email(email, code, purpose)
+    if mobile:
+        send_otp_sms(mobile, code, purpose)
     return code
 
 

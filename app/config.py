@@ -17,14 +17,19 @@ class Settings(BaseSettings):
     upload_dir: Path = DATA_DIR / "uploads"
     cors_origins: list[str] = ["*"]
 
-    # Email provider (Gmail SMTP - free, delivers to any recipient)
-    smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
-    smtp_user: str = "splititup.support@gmail.com"
-    smtp_password: str = ""
+    # Email provider (Gmail REST API over HTTPS - works on Render free tier,
+    # unlike SMTP ports 25/465/587 which free instances block)
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_refresh_token: str = ""
+    gmail_user: str = "splititup.support@gmail.com"
     email_from: str = "Splitwise Clone <splititup.support@gmail.com>"
 
-    # SMS provider (Twilio - free trial: $15 credit)
+    # SMTP fallback (works only on paid Render instances)
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""

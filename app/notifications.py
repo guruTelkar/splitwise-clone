@@ -1,10 +1,12 @@
 """Email and SMS notification service.
 
-Uses Gmail SMTP for email (free, delivers to any recipient).
+Uses the Gmail REST API over HTTPS for email (works on Render free tier,
+which blocks SMTP ports 25/465/587).
+Falls back to Gmail SMTP when OAuth credentials are not configured.
 Uses Twilio for SMS (free trial: $15 credit).
-Falls back to console logging if no SMTP credentials are configured.
 """
 
+import base64
 import logging
 import smtplib
 import socket
@@ -16,6 +18,45 @@ import httpx
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+_ACCESS_TOKEN_CACHE: dict[str, str] = {}
+
+
+def _gmail_access_token() -> str:
+    """Return a fresh OAuth2 access token for the Gmail API (cached)."""
+    if _ACCESS_TOKEN_CACHE.get("token"):
+        return _ACCESS_TOKEN_CACHE["token"]
+    resp = httpx.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": settings.gmail_refresh_token,
+            "client_id": settings.gmail_client_id,
+            "client_secret": settings.gmail_client_secret,
+        },
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Gmail token refresh failed: {resp.status_code} {resp.text}")
+    _ACCESS_TOKEN_CACHE["token"] = resp.json()["access_token"]
+    return _ACCESS_TOKEN_CACHE["token"]
+
+
+def _send_via_gmail_api(to: str, subject: str, html_body: str) -> None:
+    """Send an email through the Gmail REST API over HTTPS."""
+    msg = MIMEText(html_body, "html", "utf-8")
+    msg["From"] = settings.email_from
+    msg["To"] = to
+    msg["Subject"] = subject
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    resp = httpx.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers={"Authorization": f"Bearer {_gmail_access_token()}"},
+        json={"raw": raw},
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Gmail API send failed: {resp.status_code} {resp.text}")
 
 
 def _connect_smtp_socket(host: str, port: int) -> socket.socket:
@@ -44,17 +85,9 @@ def _connect_smtp_socket(host: str, port: int) -> socket.socket:
     raise OSError(f"Could not connect to SMTP {host}:{port} ({last_err})")
 
 
-def _build_message(to: str, subject: str, html_body: str) -> MIMEMultipart:
-    msg = MIMEMultipart("alternative")
-    msg["From"] = settings.email_from
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
-    return msg
-
-
-def _send_via_smtp_587(user: str, password: str, msg: MIMEMultipart, to: str) -> None:
+def _send_via_smtp_587(user: str, password: str, to: str, subject: str, html_body: str) -> None:
     """STARTTLS over port 587, forcing an IPv4 socket."""
+    msg = _build_message(to, subject, html_body)
     server = smtplib.SMTP(timeout=20)
     server._get_socket = lambda host, port, timeout: _connect_smtp_socket(  # noqa: SLF001
         host, port
@@ -73,8 +106,9 @@ def _send_via_smtp_587(user: str, password: str, msg: MIMEMultipart, to: str) ->
             pass
 
 
-def _send_via_smtp_465(user: str, password: str, msg: MIMEMultipart, to: str) -> None:
+def _send_via_smtp_465(user: str, password: str, to: str, subject: str, html_body: str) -> None:
     """SSL over port 465 (fallback if 587 is blocked)."""
+    msg = _build_message(to, subject, html_body)
     server = smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20)
     try:
         server.login(user, password)
@@ -86,22 +120,43 @@ def _send_via_smtp_465(user: str, password: str, msg: MIMEMultipart, to: str) ->
             pass
 
 
+def _build_message(to: str, subject: str, html_body: str) -> MIMEMultipart:
+    msg = MIMEMultipart("alternative")
+    msg["From"] = settings.email_from
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    return msg
+
+
 def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Send an email via Gmail SMTP. Returns True on success."""
+    """Send an email. Returns True on success.
+
+    Prefers the Gmail REST API (HTTPS, works on Render free tier) and falls
+    back to Gmail SMTP when OAuth credentials are not configured.
+    """
+    if settings.gmail_refresh_token:
+        try:
+            _send_via_gmail_api(to, subject, html_body)
+            logger.info(f"Email sent to {to} (Gmail API)")
+            return True
+        except Exception as e:
+            logger.error(f"Gmail API email send failed: {e}")
+            return False
+
     user = settings.smtp_user
     password = settings.smtp_password
     if not user or not password:
         logger.info(f"[EMAIL DISABLED] To: {to} | Subject: {subject}")
         print(f"[EMAIL] To: {to} | Subject: {subject} | Body: {html_body}")
         return False
-    msg = _build_message(to, subject, html_body)
     try:
-        _send_via_smtp_587(user, password, msg, to)
+        _send_via_smtp_587(user, password, to, subject, html_body)
         logger.info(f"Email sent to {to} (587 STARTTLS)")
         return True
     except Exception as e587:
         try:
-            _send_via_smtp_465(user, password, msg, to)
+            _send_via_smtp_465(user, password, to, subject, html_body)
             logger.info(f"Email sent to {to} (465 SSL fallback)")
             return True
         except Exception as e465:

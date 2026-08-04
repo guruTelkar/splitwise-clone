@@ -256,6 +256,14 @@ def add_member(
         raise HTTPException(status_code=404, detail="User not found")
     if is_group_member(db, group_id, payload.user_id):
         raise HTTPException(status_code=400, detail="Already a member")
+    # Enforce: can only add friends (not arbitrary users)
+    from ..models import FriendLink
+    is_friend = db.query(FriendLink).filter(
+        ((FriendLink.user_id == user.id) & (FriendLink.friend_id == payload.user_id))
+        | ((FriendLink.user_id == payload.user_id) & (FriendLink.friend_id == user.id))
+    ).first()
+    if not is_friend:
+        raise HTTPException(status_code=400, detail="You can only add friends to a group. Add them as a friend first.")
     db.add(GroupMember(group_id=group_id, user_id=payload.user_id))
     db.commit()
     create_activity(
